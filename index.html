@@ -1,33 +1,42 @@
 <!DOCTYPE html>
-<html>
-  <head>
-     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flight Time Calculator</title>
+</head>
+<body>
+    <h1>Flight Time Calculator</h1>
+    <form action="/calculate" method="post">
+        <label for="airport1">Airport 1:</label>
+        <input type="text" id="airport1" name="airport1">
+        <br><br>
+        <label for="airport2">Airport 2:</label>
+        <input type="text" id="airport2" name="airport2">
+        <br><br>
+        <label for="speed">Speed (kts):</label>
+        <input type="number" id="speed" name="speed">
+        <br><br>
+        <input type="submit" value="Calculate">
+    </form>
+    <br><br>
+    {% if result %}
+        <h2>Result:</h2>
+        <p>Flight time: {{ result }}</p>
+    {% endif %}
+     <h1>Find the Closest Plane</h1>
+    <form action="/findplane" method="post">
+      <label for="aircraft1_pos">Aircraft 1 Position:</label>
+      <input type="text" id="aircraft1_pos" name="aircraft1_pos"><br><br>
+      <label for="aircraft2_pos">Aircraft 2 Position:</label>
+      <input type="text" id="aircraft2_pos" name="aircraft2_pos"><br><br>
+      <label for="airport1h">Departure Airport:</label>
+      <input type="text" id="airport1h" name="airport1h"><br><br>
+      <input type="submit" value="Find Closest Plane">
+    </form>
+    {% if findplaneresults %}
+        <h2>Result:</h2>
+        <p>Option: {{ findplaneresults }}</p>
+    {% endif %}
 
-    <title>Startup</title>
-
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css?family=Montserrat" rel="stylesheet">
-
-    <!-- Bootstrap CSS from a CDN. This way you don't have to include the bootstrap file yourself -->
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
-    
-    <!-- Your own stylesheet -->
-    <link rel="stylesheet" type="text/css" href="style.css">
-  </head>
-  <body>
-    <div class="container d-flex align-items-center h-100">
-      <div class="row">
-        <header class="text-center col-12">
-<h1><strong>the biggest startup event of the year</strong></h1>
-</header>
-<div class="buffer col-12"></div>
-<section class="text-center col-12">
-<hr>
-<a href="https://mailchi.mp/8f367b798e7a/startup">
-<button class="btn btn-primary btn-xl">Find out more</button> </a>
-</section>
-</div>
-</div>
-  </body>
+   </body>
 </html>
