@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flight Operations Toolkit</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="page">
+        <header class="page-header">
+            <h1>Flight Operations Toolkit</h1>
+            <p>Plan trip times, coordinate aircraft positioning, and maintain your weekly schedule.</p>
+        </header>
+
+        <main class="content">
+            <section class="card">
+                <h2>Flight Time Calculator</h2>
+                <p class="card-intro">Select the departure and arrival aerodromes and choose your aircraft type to estimate the total block time.</p>
+                {% if flight_error %}
+                    <p class="alert alert-error">{{ flight_error }}</p>
+                {% endif %}
+                <form action="/calculate" method="post" class="form-grid">
+                    <label for="airport1">Departure airport</label>
+                    <input type="text" id="airport1" name="airport1" list="airport-codes" autocomplete="off" value="{{ flight_form.airport1 }}" required>
+
+                    <label for="airport2">Arrival airport</label>
+                    <input type="text" id="airport2" name="airport2" list="airport-codes" autocomplete="off" value="{{ flight_form.airport2 }}" required>
+
+                    <label for="aircraft_type">Aircraft type</label>
+                    <select id="aircraft_type" name="aircraft_type" required>
+                        {% for aircraft in aircraft_types %}
+                            <option value="{{ aircraft.key }}" {% if aircraft.key == flight_form.aircraft_type %}selected{% endif %}>{{ aircraft.label }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <button type="submit" class="primary-button">Calculate</button>
+                </form>
+
+                {% if result_summary %}
+                    <div class="result-card">
+                        <h3>Result</h3>
+                        <p>{{ result_summary }}</p>
+                    </div>
+                {% endif %}
+
+                {% if map_route %}
+                    {% if google_maps_api_key %}
+                        <div id="map" class="map"></div>
+                        <script>
+                            function initMap() {
+                                const route = {{ map_route | tojson }};
+                                const origin = { lat: route.origin.lat, lng: route.origin.lng };
+                                const destination = { lat: route.destination.lat, lng: route.destination.lng };
+
+                                const map = new google.maps.Map(document.getElementById("map"), {
+                                    mapTypeId: "terrain",
+                                });
+
+                                const bounds = new google.maps.LatLngBounds();
+                                bounds.extend(origin);
+                                bounds.extend(destination);
+                                map.fitBounds(bounds);
+
+                                new google.maps.Marker({ position: origin, map: map, title: route.origin.label });
+                                new google.maps.Marker({ position: destination, map: map, title: route.destination.label });
+
+                                const flightPath = new google.maps.Polyline({
+                                    path: [origin, destination],
+                                    geodesic: true,
+                                    strokeColor: "#0b5ed7",
+                                    strokeOpacity: 0.85,
+                                    strokeWeight: 4,
+                                });
+                                flightPath.setMap(map);
+                            }
+                        </script>
+                        <script src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap" async defer></script>
+                    {% else %}
+                        <p class="alert alert-info">Configure a Google Maps API key to view the route visualisation.</p>
+                    {% endif %}
+                {% endif %}
+            </section>
+
+            <section class="card">
+                <h2>Find the Closest Aircraft</h2>
+                <p class="card-intro">Compare two aircraft positions to identify which one can reach the next mission sooner.</p>
+                {% if findplane_error %}
+                    <p class="alert alert-error">{{ findplane_error }}</p>
+                {% endif %}
+                <form action="/findplane" method="post" class="form-grid">
+                    <label for="aircraft1_pos">Aircraft 1 position</label>
+                    <input type="text" id="aircraft1_pos" name="aircraft1_pos" list="airport-codes" autocomplete="off" value="{{ findplane_form.aircraft1_pos }}" required>
+
+                    <label for="aircraft2_pos">Aircraft 2 position</label>
+                    <input type="text" id="aircraft2_pos" name="aircraft2_pos" list="airport-codes" autocomplete="off" value="{{ findplane_form.aircraft2_pos }}" required>
+
+                    <label for="airport1h">Mission departure airport</label>
+                    <input type="text" id="airport1h" name="airport1h" list="airport-codes" autocomplete="off" value="{{ findplane_form.airport1h }}" required>
+
+                    <button type="submit" class="primary-button">Evaluate</button>
+                </form>
+                {% if findplaneresults %}
+                    <div class="result-card">
+                        <h3>Recommendation</h3>
+                        <p>{{ findplaneresults }}</p>
+                    </div>
+                {% endif %}
+            </section>
+
+            <section class="card" id="fleet-card">
+                <h2>Fleet Management</h2>
+                <p class="card-intro">Maintain the list of aircraft available for automatic schedule optimisation.</p>
+                <form id="fleet-form" class="form-grid">
+                    <label for="fleet-registration">Registration</label>
+                    <input type="text" id="fleet-registration" name="registration" placeholder="e.g. 9A-ABC" required>
+
+                    <label for="fleet-type">Aircraft type</label>
+                    <select id="fleet-type" name="type_key" required>
+                        {% for aircraft in aircraft_types %}
+                            <option value="{{ aircraft.key }}">{{ aircraft.label }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <label for="fleet-max-pax">Maximum passengers</label>
+                    <input type="number" id="fleet-max-pax" name="max_pax" min="1" value="6" required>
+
+                    <button type="submit" class="primary-button">Add aircraft</button>
+                </form>
+
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Registration</th>
+                                <th>Type</th>
+                                <th>Max pax</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fleet-body">
+                            <tr class="muted">
+                                <td colspan="4">No aircraft added yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card" id="schedule-card">
+                <h2>Weekly Schedule Planner</h2>
+                <p class="card-intro">Log confirmed missions, adjust them on the fly, and let the system assign aircraft automatically to minimise ferry time.</p>
+                <div id="schedule-errors" class="alert alert-error hidden"></div>
+                <div class="schedule-actions">
+                    <button type="button" id="add-mission" class="secondary-button">Add mission</button>
+                </div>
+                <div class="table-wrapper">
+                    <table id="schedule-table">
+                        <thead>
+                            <tr>
+                                <th>Departure</th>
+                                <th>Arrival</th>
+                                <th>Departure time</th>
+                                <th>Aircraft type</th>
+                                <th>Mission</th>
+                                <th>Preferred reg.</th>
+                                <th>Assigned reg.</th>
+                                <th>PIC</th>
+                                <th>SIC</th>
+                                <th>CA1</th>
+                                <th>Flight time</th>
+                                <th>Arrival time</th>
+                                <th>Notes</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="schedule-body">
+                            <tr class="muted">
+                                <td colspan="14">No missions scheduled yet. Add the first entry above.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <datalist id="airport-codes">
+            {% for airport in airports %}
+                <option value="{{ airport.value }}">{{ airport.label }}</option>
+            {% endfor %}
+        </datalist>
+    </div>
+
+    <script>
+        window.APP_CONFIG = {
+            aircraftTypes: {{ aircraft_types | tojson }},
+            missionTypes: {{ mission_types | tojson }},
+            picOptions: {{ pic_options | tojson }},
+            sicOptions: {{ sic_options | tojson }},
+            ca1Options: {{ ca1_options | tojson }}
+        };
+    </script>
+    <script>
+        (function () {
+            const state = {
+                fleet: [],
+                schedule: [],
+                errors: []
+            };
+
+            const fleetBody = document.getElementById('fleet-body');
+            const fleetForm = document.getElementById('fleet-form');
+            const addMissionBtn = document.getElementById('add-mission');
+            const scheduleBody = document.getElementById('schedule-body');
+            const scheduleErrors = document.getElementById('schedule-errors');
+            let draftRow = null;
+
+            async function fetchState() {
+                const response = await fetch('/api/state');
+                const payload = await response.json();
+                state.fleet = payload.fleet || [];
+                state.schedule = payload.schedule || [];
+                state.errors = payload.errors || [];
+                renderFleet();
+                renderSchedule();
+                renderErrors();
+            }
+
+            function renderErrors() {
+                if (state.errors.length === 0) {
+                    scheduleErrors.classList.add('hidden');
+                    scheduleErrors.textContent = '';
+                    return;
+                }
+                scheduleErrors.textContent = state.errors.join(' ');
+                scheduleErrors.classList.remove('hidden');
+            }
+
+            function renderFleet() {
+                fleetBody.innerHTML = '';
+                if (state.fleet.length === 0) {
+                    const row = document.createElement('tr');
+                    row.classList.add('muted');
+                    const cell = document.createElement('td');
+                    cell.colSpan = 4;
+                    cell.textContent = 'No aircraft added yet.';
+                    row.appendChild(cell);
+                    fleetBody.appendChild(row);
+                    return;
+                }
+
+                state.fleet.forEach((item) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${item.registration}</td>
+                        <td>${item.type_label}</td>
+                        <td>${item.max_pax}</td>
+                        <td class="actions"></td>
+                    `;
+                    const actionsCell = row.querySelector('.actions');
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'link-button';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', async () => {
+                        await fetch(`/api/aircraft/${encodeURIComponent(item.registration)}`, { method: 'DELETE' });
+                        await fetchState();
+                    });
+                    actionsCell.appendChild(removeBtn);
+                    fleetBody.appendChild(row);
+                });
+            }
+
+            function createSelect(options, value) {
+                const select = document.createElement('select');
+                select.className = 'schedule-input';
+                options.forEach((option) => {
+                    const opt = document.createElement('option');
+                    if (typeof option === 'string') {
+                        opt.value = option;
+                        opt.textContent = option;
+                    } else {
+                        opt.value = option.value;
+                        opt.textContent = option.label;
+                    }
+                    if (option.value === undefined && option === value) {
+                        opt.selected = true;
+                    } else if (opt.value === value) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+                if (value !== undefined && value !== null) {
+                    select.value = value;
+                }
+                return select;
+            }
+
+            function buildRegistrationOptions(typeKey, currentValue) {
+                const options = [{ value: '', label: '— Any —' }];
+                state.fleet
+                    .filter((item) => item.type_key === typeKey)
+                    .forEach((item) => options.push({ value: item.registration, label: item.registration }));
+                const select = createSelect(options, currentValue || '');
+                return select;
+            }
+
+            function buildAircraftSelect(currentValue) {
+                const options = APP_CONFIG.aircraftTypes.map((item) => ({ value: item.key, label: item.label }));
+                return createSelect(options, currentValue);
+            }
+
+            function buildMissionSelect(currentValue) {
+                const options = APP_CONFIG.missionTypes.map((item) => ({ value: item, label: item }));
+                return createSelect(options, currentValue);
+            }
+
+            function buildCrewSelect(values, currentValue) {
+                const options = values.map((item) => ({ value: item, label: item }));
+                return createSelect(options, currentValue);
+            }
+
+            function renderSchedule() {
+                scheduleBody.innerHTML = '';
+
+                if (draftRow) {
+                    scheduleBody.appendChild(draftRow);
+                }
+
+                if (state.schedule.length === 0 && !draftRow) {
+                    const row = document.createElement('tr');
+                    row.classList.add('muted');
+                    const cell = document.createElement('td');
+                    cell.colSpan = 14;
+                    cell.textContent = 'No missions scheduled yet. Add the first entry above.';
+                    row.appendChild(cell);
+                    scheduleBody.appendChild(row);
+                    return;
+                }
+
+                state.schedule.forEach((entry) => {
+                    const row = entry.auto_generated ? renderAutoRow(entry) : renderEditableRow(entry);
+                    scheduleBody.appendChild(row);
+                });
+            }
+
+            function renderAutoRow(entry) {
+                const row = document.createElement('tr');
+                row.classList.add('auto-row');
+                row.innerHTML = `
+                    <td>${entry.departure_airport_display || entry.departure_airport || '—'}</td>
+                    <td>${entry.arrival_airport_display || entry.arrival_airport}</td>
+                    <td>${entry.departure_time_display}</td>
+                    <td>${entry.aircraft_label}</td>
+                    <td>${entry.mission_type}</td>
+                    <td>${entry.requested_registration || '—'}</td>
+                    <td>${entry.assigned_registration}</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>—</td>
+                    <td>${entry.flight_time}</td>
+                    <td>${entry.arrival_time_display}</td>
+                    <td>${entry.notes || ''}</td>
+                    <td></td>
+                `;
+                return row;
+            }
+
+            function renderEditableRow(entry) {
+                const row = document.createElement('tr');
+                row.dataset.entryId = entry.entry_id;
+
+                const departureCell = document.createElement('td');
+                const departureInput = document.createElement('input');
+                departureInput.type = 'text';
+                departureInput.value = entry.departure_airport;
+                departureInput.required = true;
+                departureInput.setAttribute('list', 'airport-codes');
+                departureInput.className = 'schedule-input';
+                departureCell.appendChild(departureInput);
+
+                const arrivalCell = document.createElement('td');
+                const arrivalInput = document.createElement('input');
+                arrivalInput.type = 'text';
+                arrivalInput.value = entry.arrival_airport;
+                arrivalInput.required = true;
+                arrivalInput.setAttribute('list', 'airport-codes');
+                arrivalInput.className = 'schedule-input';
+                arrivalCell.appendChild(arrivalInput);
+
+                const departureTimeCell = document.createElement('td');
+                const departureTimeInput = document.createElement('input');
+                departureTimeInput.type = 'datetime-local';
+                departureTimeInput.value = entry.departure_time_value;
+                departureTimeInput.required = true;
+                departureTimeInput.className = 'schedule-input';
+                departureTimeCell.appendChild(departureTimeInput);
+
+                const aircraftCell = document.createElement('td');
+                const aircraftSelect = buildAircraftSelect(entry.aircraft_type);
+                aircraftCell.appendChild(aircraftSelect);
+
+                const missionCell = document.createElement('td');
+                const missionSelect = buildMissionSelect(entry.mission_type);
+                missionCell.appendChild(missionSelect);
+
+                const preferredCell = document.createElement('td');
+                let preferredSelect = buildRegistrationOptions(entry.aircraft_type, entry.requested_registration);
+                preferredCell.appendChild(preferredSelect);
+
+                aircraftSelect.addEventListener('change', () => {
+                    const newSelect = buildRegistrationOptions(aircraftSelect.value, preferredSelect.value);
+                    preferredCell.replaceChild(newSelect, preferredSelect);
+                    preferredSelect = newSelect;
+                });
+
+                const assignedCell = document.createElement('td');
+                assignedCell.textContent = entry.assigned_registration || '—';
+
+                const picCell = document.createElement('td');
+                const picSelect = buildCrewSelect(APP_CONFIG.picOptions, entry.pic);
+                picCell.appendChild(picSelect);
+
+                const sicCell = document.createElement('td');
+                const sicSelect = buildCrewSelect(APP_CONFIG.sicOptions, entry.sic);
+                sicCell.appendChild(sicSelect);
+
+                const ca1Cell = document.createElement('td');
+                const ca1Select = buildCrewSelect(APP_CONFIG.ca1Options, entry.ca1);
+                ca1Cell.appendChild(ca1Select);
+
+                const flightCell = document.createElement('td');
+                flightCell.textContent = entry.flight_time || '—';
+
+                const arrivalTimeCell = document.createElement('td');
+                arrivalTimeCell.textContent = entry.arrival_time_display || '—';
+
+                const notesCell = document.createElement('td');
+                notesCell.textContent = entry.notes || '';
+
+                const actionsCell = document.createElement('td');
+                actionsCell.className = 'actions';
+                const saveBtn = document.createElement('button');
+                saveBtn.type = 'button';
+                saveBtn.className = 'secondary-button';
+                saveBtn.textContent = 'Save';
+                saveBtn.addEventListener('click', async () => {
+                    if (!departureInput.value || !arrivalInput.value || !departureTimeInput.value) {
+                        alert('Please fill in departure, arrival, and departure time.');
+                        return;
+                    }
+                    const payload = {
+                        departure_airport: departureInput.value.toUpperCase(),
+                        arrival_airport: arrivalInput.value.toUpperCase(),
+                        departure_time: departureTimeInput.value,
+                        aircraft_type: aircraftSelect.value,
+                        mission_type: missionSelect.value,
+                        requested_registration: preferredSelect.value,
+                        pic: picSelect.value,
+                        sic: sicSelect.value,
+                        ca1: ca1Select.value,
+                    };
+                    const response = await fetch(`/api/schedule/${entry.entry_id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    if (!response.ok) {
+                        const error = await response.json();
+                        alert(error.error || 'Unable to update the mission.');
+                        return;
+                    }
+                    await fetchState();
+                });
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'link-button';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.addEventListener('click', async () => {
+                    await fetch(`/api/schedule/${entry.entry_id}`, { method: 'DELETE' });
+                    await fetchState();
+                });
+
+                actionsCell.appendChild(saveBtn);
+                actionsCell.appendChild(deleteBtn);
+
+                row.appendChild(departureCell);
+                row.appendChild(arrivalCell);
+                row.appendChild(departureTimeCell);
+                row.appendChild(aircraftCell);
+                row.appendChild(missionCell);
+                row.appendChild(preferredCell);
+                row.appendChild(assignedCell);
+                row.appendChild(picCell);
+                row.appendChild(sicCell);
+                row.appendChild(ca1Cell);
+                row.appendChild(flightCell);
+                row.appendChild(arrivalTimeCell);
+                row.appendChild(notesCell);
+                row.appendChild(actionsCell);
+
+                return row;
+            }
+
+            function createDraftRow() {
+                const entry = {
+                    entry_id: null,
+                    departure_airport: '',
+                    arrival_airport: '',
+                    departure_time_value: new Date().toISOString().slice(0, 16),
+                    aircraft_type: APP_CONFIG.aircraftTypes[0].key,
+                    mission_type: APP_CONFIG.missionTypes[0],
+                    requested_registration: '',
+                    assigned_registration: '',
+                    pic: APP_CONFIG.picOptions[0],
+                    sic: APP_CONFIG.sicOptions[0],
+                    ca1: APP_CONFIG.ca1Options[0],
+                    flight_time: '',
+                    arrival_time_display: '',
+                    notes: ''
+                };
+
+                const row = document.createElement('tr');
+                row.classList.add('draft-row');
+
+                const departureCell = document.createElement('td');
+                const departureInput = document.createElement('input');
+                departureInput.type = 'text';
+                departureInput.required = true;
+                departureInput.placeholder = 'Departure';
+                departureInput.setAttribute('list', 'airport-codes');
+                departureCell.appendChild(departureInput);
+
+                const arrivalCell = document.createElement('td');
+                const arrivalInput = document.createElement('input');
+                arrivalInput.type = 'text';
+                arrivalInput.required = true;
+                arrivalInput.placeholder = 'Arrival';
+                arrivalInput.setAttribute('list', 'airport-codes');
+                arrivalCell.appendChild(arrivalInput);
+
+                const departureTimeCell = document.createElement('td');
+                const departureTimeInput = document.createElement('input');
+                departureTimeInput.type = 'datetime-local';
+                departureTimeInput.value = entry.departure_time_value;
+                departureTimeInput.required = true;
+                departureTimeCell.appendChild(departureTimeInput);
+
+                const aircraftCell = document.createElement('td');
+                const aircraftSelect = buildAircraftSelect(entry.aircraft_type);
+                aircraftCell.appendChild(aircraftSelect);
+
+                const missionCell = document.createElement('td');
+                const missionSelect = buildMissionSelect(entry.mission_type);
+                missionCell.appendChild(missionSelect);
+
+                const preferredCell = document.createElement('td');
+                let preferredSelect = buildRegistrationOptions(entry.aircraft_type, entry.requested_registration);
+                preferredCell.appendChild(preferredSelect);
+
+                aircraftSelect.addEventListener('change', () => {
+                    const newSelect = buildRegistrationOptions(aircraftSelect.value, preferredSelect.value);
+                    preferredCell.replaceChild(newSelect, preferredSelect);
+                    preferredSelect = newSelect;
+                });
+
+                const assignedCell = document.createElement('td');
+                assignedCell.textContent = '—';
+
+                const picCell = document.createElement('td');
+                const picSelect = buildCrewSelect(APP_CONFIG.picOptions, entry.pic);
+                picCell.appendChild(picSelect);
+
+                const sicCell = document.createElement('td');
+                const sicSelect = buildCrewSelect(APP_CONFIG.sicOptions, entry.sic);
+                sicCell.appendChild(sicSelect);
+
+                const ca1Cell = document.createElement('td');
+                const ca1Select = buildCrewSelect(APP_CONFIG.ca1Options, entry.ca1);
+                ca1Cell.appendChild(ca1Select);
+
+                const flightCell = document.createElement('td');
+                flightCell.textContent = '—';
+
+                const arrivalTimeCell = document.createElement('td');
+                arrivalTimeCell.textContent = '—';
+
+                const notesCell = document.createElement('td');
+                notesCell.textContent = '';
+
+                const actionsCell = document.createElement('td');
+                actionsCell.className = 'actions';
+
+                const saveBtn = document.createElement('button');
+                saveBtn.type = 'button';
+                saveBtn.className = 'secondary-button';
+                saveBtn.textContent = 'Save';
+                saveBtn.addEventListener('click', async () => {
+                    if (!departureInput.value || !arrivalInput.value || !departureTimeInput.value) {
+                        alert('Please fill in departure, arrival, and departure time.');
+                        return;
+                    }
+                    const payload = {
+                        departure_airport: departureInput.value.toUpperCase(),
+                        arrival_airport: arrivalInput.value.toUpperCase(),
+                        departure_time: departureTimeInput.value,
+                        aircraft_type: aircraftSelect.value,
+                        mission_type: missionSelect.value,
+                        requested_registration: preferredSelect.value,
+                        pic: picSelect.value,
+                        sic: sicSelect.value,
+                        ca1: ca1Select.value,
+                    };
+                    const response = await fetch('/api/schedule', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    if (response.ok) {
+                        draftRow = null;
+                        await fetchState();
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || 'Unable to create schedule entry.');
+                    }
+                });
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.className = 'link-button';
+                cancelBtn.textContent = 'Cancel';
+                cancelBtn.addEventListener('click', () => {
+                    draftRow = null;
+                    renderSchedule();
+                });
+
+                actionsCell.appendChild(saveBtn);
+                actionsCell.appendChild(cancelBtn);
+
+                row.appendChild(departureCell);
+                row.appendChild(arrivalCell);
+                row.appendChild(departureTimeCell);
+                row.appendChild(aircraftCell);
+                row.appendChild(missionCell);
+                row.appendChild(preferredCell);
+                row.appendChild(assignedCell);
+                row.appendChild(picCell);
+                row.appendChild(sicCell);
+                row.appendChild(ca1Cell);
+                row.appendChild(flightCell);
+                row.appendChild(arrivalTimeCell);
+                row.appendChild(notesCell);
+                row.appendChild(actionsCell);
+
+                return row;
+            }
+
+            fleetForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const formData = new FormData(fleetForm);
+                const payload = {
+                    registration: formData.get('registration'),
+                    type_key: formData.get('type_key'),
+                    max_pax: formData.get('max_pax'),
+                };
+                const response = await fetch('/api/aircraft', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(error.error || 'Unable to add aircraft.');
+                    return;
+                }
+                fleetForm.reset();
+                await fetchState();
+            });
+
+            addMissionBtn.addEventListener('click', () => {
+                if (draftRow) {
+                    scheduleBody.scrollIntoView({ behavior: 'smooth' });
+                    return;
+                }
+                draftRow = createDraftRow();
+                renderSchedule();
+            });
+
+            fetchState();
+        })();
+    </script>
+</body>
+</html>
